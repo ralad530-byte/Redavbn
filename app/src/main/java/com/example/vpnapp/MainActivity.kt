@@ -1,88 +1,22 @@
-bcdb-628db1508e15@81.168.70.210:8080?encryption=none&host=www.pubgmobile.com&path=%2F&security=none&type=ws#%D8%A7%D9%88%D9%88%D8%AF%D9%8A-vbn"
-
-class MainActivity : Activity() {
-    private val links = mutableListOf<String>()
-    private val ms = mutableMapOf<String, String>()
-    private var sel = 0
-    private lateinit var list: LinearLayout
-    private lateinit var btn: Button
-    private lateinit var logView: TextView
-    private lateinit var input: EditText
-    private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
-
-    override fun onCreate(b: Bundle?) {
-        super.onCreate(b)
-        links.addAll(prefs.getString("links", DEFAULT_LINK)!!.split("\n").filter { it.isNotBlank() })
-        LogStore.load(this)
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 48, 32, 32) }
-        btn = Button(this).apply { textSize = 18f; setOnClickListener { toggle() } }
-        list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val pingAll = Button(this).apply { text = "قياس زمن استجابة الكل"; setOnClickListener { links.indices.forEach { pingOne(it) } } }
-        input = EditText(this).apply { hint = "vless://..."; textDirection = View.TEXT_DIRECTION_LTR }
-        val add = Button(this).apply { text = "إضافة خادم"; setOnClickListener { addLink() } }
-        val clr = Button(this).apply { text = "مسح السجلات"; setOnClickListener { LogStore.clear(this@MainActivity) } }
-        logView = TextView(this).apply { textSize = 12f; typeface = android.graphics.Typeface.MONOSPACE; textDirection = View.TEXT_DIRECTION_LTR }
-        listOf(btn, TextView(this).apply { text = "الخوادم"; textSize = 16f; setPadding(0, 24, 0, 8) }, list, pingAll, input, add,
-            TextView(this).apply { text = "سجلات الاتصال"; textSize = 16f; setPadding(0, 24, 0, 8) }, clr, logView)
-            .forEach { root.addView(it) }
-        setContentView(ScrollView(this).apply { addView(root) })
-        LogStore.listener = { runOnUiThread { logView.text = LogStore.text(); refreshBtn() } }
-        render(); logView.text = LogStore.text(); refreshBtn()
-    }
-
-    private val vpnPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        if (it.resultCode == RESULT_OK) startVpn() else LogStore.add(this, "تم رفض إذن VPN")
-    }
-
-    private fun toggle() {
-        if (XrayVpnService.running) {
-            startService(Intent(this, XrayVpnService::class.java).setAction(XrayVpnService.ACTION_STOP)); return
-        }
-        val i = VpnService.prepare(this)
-        if (i != null) vpnPermission.launch(i) else startVpn()
-    }
-    private fun startVpn() = startForegroundService(Intent(this, XrayVpnService::class.java).putExtra("link", links[sel]))
-
-    private fun refreshBtn() { btn.text = if (XrayVpnService.running) "قطع الاتصال" else "اتصال" }
-
-    private fun addLink() {
-        val l = input.text.toString().trim()
-        if (VlessServer.parse(l) == null) { LogStore.add(this, "رابط غير صالح"); return }
-        links.add(l); prefs.edit().putString("links", links.joinToString("\n")).apply()
-        input.setText(""); LogStore.add(this, "تمت إضافة خادم"); render()
-    }
-
-    // قياس زمن الاستجابة الحقيقي: زمن اتصال TCP بالخادم
-    private fun pingOne(i: Int) {
-        val s = VlessServer.parse(links[i]) ?: return
-        ms[links[i]] = "..."; render()
-        Thread {
-            val t0 = System.nanoTime()
-            val res = try {
-                Socket().use { it.connect(InetSocketAddress(s.host, s.port), 4000) }
-                "${(System.nanoTime() - t0) / 1_000_000} ms"
-            } catch (e: Exception) { "فشل" }
-            ms[links[i]] = res
-            LogStore.add(this, "قياس ${s.name}: $res")
-            runOnUiThread { render() }
-        }.start()
-    }
-
-    private fun render() {
-        list.removeAllViews()
-        links.forEachIndexed { i, l ->
-            val s = VlessServer.parse(l) ?: return@forEachIndexed
-            val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(16, 16, 16, 16)
-                setBackgroundColor(if (i == sel) 0x222563EB else 0) ; setOnClickListener { sel = i; render() } }
-            row.addView(TextView(this).apply { text = "${s.name}\n${s.host}:${s.port}"; layoutParams = LinearLayout.LayoutParams(0, -2, 1f) })
-            row.addView(TextView(this).apply { text = ms[l] ?: "—"; setPadding(16, 0, 16, 0) })
-            row.addView(Button(this).apply { text = "⚡"; setOnClickListener { pingOne(i) } })
-            list.addView(row)
-        }
-    }
+plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
+android {
+    namespace = "com.example.vpnapp"
+    compileSdk = 34
+    defaultConfig { applicationId = "com.example.vpnapp"; minSdk = 24; targetSdk = 34; versionCode = 1; versionName = "1.0" }
+    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+    kotlinOptions { jvmTarget = "17" }
+    packaging { jniLibs { useLegacyPackaging = true } }
+}
+dependencies {
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
+    implementation("androidx.core:core-ktx:1.13.1")
 }
 
-app/src/main/java/com/example/vpnapp/VlessConfig.kt
+=== app/src/main/AndroidManifest.xml ===
+<?xml version="1.0" encoding="utf-8"?>
+
+
+=== app/src/main/java/com/example/vpnapp/VlessConfig.kt ===
 package com.example.vpnapp
 import org.json.JSONArray
 import org.json.JSONObject
@@ -128,7 +62,33 @@ data class VlessServer(
     }
 }
 
-app/src/main/java/com/example/vpnapp/XrayVpnService.kt
+=== app/src/main/java/com/example/vpnapp/LogStore.kt ===
+package com.example.vpnapp
+import android.content.Context
+import java.text.SimpleDateFormat
+import java.util.*
+
+object LogStore {
+    private val lines = ArrayDeque<String>()
+    var listener: (() -> Unit)? = null
+    private val fmt = SimpleDateFormat("HH:mm:ss", Locale.US)
+    private fun prefs(c: Context) = c.getSharedPreferences("logs", Context.MODE_PRIVATE)
+
+    fun load(c: Context) {
+        lines.clear()
+        prefs(c).getString("l", "")!!.split("\n").filter { it.isNotBlank() }.forEach { lines.add(it) }
+    }
+    @Synchronized fun add(c: Context, msg: String) {
+        lines.addFirst("[${fmt.format(Date())}] $msg")
+        while (lines.size > 300) lines.removeLast()
+        prefs(c).edit().putString("l", lines.joinToString("\n")).apply()
+        listener?.invoke()
+    }
+    @Synchronized fun clear(c: Context) { lines.clear(); prefs(c).edit().clear().apply(); listener?.invoke() }
+    @Synchronized fun text(): String = if (lines.isEmpty()) "لا توجد سجلات" else lines.joinToString("\n")
+}
+
+=== app/src/main/java/com/example/vpnapp/XrayVpnService.kt ===
 package com.example.vpnapp
 import android.app.*
 import android.content.Intent
@@ -203,15 +163,62 @@ class XrayVpnService : VpnService() {
     }
 }
 
-build.gradle.kts
-plugins {
-    id("com.android.application") version "8.5.2" apply false
-    id("org.jetbrains.kotlin.android") version "1.9.24" apply false
-}
+=== app/src/main/java/com/example/vpnapp/MainActivity.kt ===
+package com.example.vpnapp
+import android.app.Activity
+import android.content.Intent
+import android.net.VpnService
+import android.os.Bundle
+import android.view.Gravity
+import android.view.View
+import android.widget.*
+import androidx.activity.result.contract.ActivityResultContracts
+import java.net.InetSocketAddress
+import java.net.Socket
 
-settings.gradle.kts
-pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
-dependencyResolutionManagement { repositories { google(); mavenCentral() } }
-rootProject.name = "VpnApp"
-include(":app")
+const val DEFAULT_LINK = "vless://5812fa9d-81fd-4f45-bcdb-628db1508e15@81.168.70.210:8080?encryption=none&host=www.pubgmobile.com&path=%2F&security=none&type=ws#%D8%A7%D9%88%D9%88%D8%AF%D9%8A-vbn"
 
+class MainActivity : Activity() {
+    private val links = mutableListOf<String>()
+    private val ms = mutableMapOf<String, String>()
+    private var sel = 0
+    private lateinit var list: LinearLayout
+    private lateinit var btn: Button
+    private lateinit var logView: TextView
+    private lateinit var input: EditText
+    private val prefs by lazy { getSharedPreferences("app", MODE_PRIVATE) }
+
+    override fun onCreate(b: Bundle?) {
+        super.onCreate(b)
+        links.addAll(prefs.getString("links", DEFAULT_LINK)!!.split("\n").filter { it.isNotBlank() })
+        LogStore.load(this)
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 48, 32, 32) }
+        btn = Button(this).apply { textSize = 18f; setOnClickListener { toggle() } }
+        list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val pingAll = Button(this).apply { text = "قياس زمن استجابة الكل"; setOnClickListener { links.indices.forEach { pingOne(it) } } }
+        input = EditText(this).apply { hint = "vless://..."; textDirection = View.TEXT_DIRECTION_LTR }
+        val add = Button(this).apply { text = "إضافة خادم"; setOnClickListener { addLink() } }
+        val clr = Button(this).apply { text = "مسح السجلات"; setOnClickListener { LogStore.clear(this@MainActivity) } }
+        logView = TextView(this).apply { textSize = 12f; typeface = android.graphics.Typeface.MONOSPACE; textDirection = View.TEXT_DIRECTION_LTR }
+        listOf(btn, TextView(this).apply { text = "الخوادم"; textSize = 16f; setPadding(0, 24, 0, 8) }, list, pingAll, input, add,
+            TextView(this).apply { text = "سجلات الاتصال"; textSize = 16f; setPadding(0, 24, 0, 8) }, clr, logView)
+            .forEach { root.addView(it) }
+        setContentView(ScrollView(this).apply { addView(root) })
+        LogStore.listener = { runOnUiThread { logView.text = LogStore.text(); refreshBtn() } }
+        render(); logView.text = LogStore.text(); refreshBtn()
+    }
+
+    private val vpnPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (it.resultCode == RESULT_OK) startVpn() else LogStore.add(this, "تم رفض إذن VPN")
+    }
+
+    private fun toggle() {
+        if (XrayVpnService.running) {
+            startService(Intent(this, XrayVpnService::class.java).setAction(XrayVpnService.ACTION_STOP)); return
+        }
+        val i = VpnService.prepare(this)
+        if (i != null) vpnPermission.launch(i) else startVpn()
+    }
+    private fun startVpn() = startForegroundService(Intent(this, XrayVpnService::class.java).putExtra("link", links[sel]))
+
+    private fun refreshBtn() { btn.text = if (XrayVpnService.running) "قطع...
